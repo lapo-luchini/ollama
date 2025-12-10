@@ -267,6 +267,12 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 			slog.Warn("embedded messages in the model not supported with '/api/generate'; try '/api/chat' instead")
 		}
 
+		contentType := "application/x-ndjson"
+		if req.Stream != nil && !*req.Stream {
+			contentType = "application/json; charset=utf-8"
+		}
+		c.Header("Content-Type", contentType)
+
 		fn := func(resp api.GenerateResponse) error {
 			resp.Model = origModel
 			resp.RemoteModel = m.Config.RemoteModel
@@ -308,12 +314,6 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 			return
 		}
 
-		contentType := "application/json; charset=utf-8"
-		if req.Stream != nil && *req.Stream {
-			contentType = "application/x-ndjson"
-		}
-		c.Header("Content-Type", contentType)
-
 		return
 	}
 
@@ -345,7 +345,7 @@ func (s *Server) GenerateHandler(c *gin.Context) {
 		builtinParser = parsers.ParserForName(m.Config.Parser)
 		if builtinParser != nil {
 			// no tools or last message for generate endpoint
-			builtinParser.Init(nil, nil)
+			builtinParser.Init(nil, nil, req.Think)
 		}
 	}
 
@@ -1976,6 +1976,12 @@ func (s *Server) ChatHandler(c *gin.Context) {
 			}
 		}
 
+		contentType := "application/x-ndjson"
+		if req.Stream != nil && !*req.Stream {
+			contentType = "application/json; charset=utf-8"
+		}
+		c.Header("Content-Type", contentType)
+
 		fn := func(resp api.ChatResponse) error {
 			resp.Model = origModel
 			resp.RemoteModel = m.Config.RemoteModel
@@ -2016,12 +2022,6 @@ func (s *Server) ChatHandler(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-
-		contentType := "application/json; charset=utf-8"
-		if req.Stream != nil && *req.Stream {
-			contentType = "application/x-ndjson"
-		}
-		c.Header("Content-Type", contentType)
 
 		return
 	}
@@ -2088,7 +2088,7 @@ func (s *Server) ChatHandler(c *gin.Context) {
 				lastMessage = &msgs[len(msgs)-1]
 			}
 			// Initialize parser and get processed tools
-			processedTools = builtinParser.Init(req.Tools, lastMessage)
+			processedTools = builtinParser.Init(req.Tools, lastMessage, req.Think)
 		}
 	}
 
