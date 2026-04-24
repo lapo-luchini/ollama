@@ -19,6 +19,22 @@ const (
 	namespace = "ollama"
 )
 
+// RunningModelInfo holds information about a single running model for Prometheus metrics.
+type RunningModelInfo struct {
+	Name            string // Full model name (e.g., lapo/qwen3.6:35b-a3b-coding-int4)
+	Digest          string   // Model digest/hash
+	Size            int64  // Total model size in bytes
+	SizeVRAM        int64    // VRAM usage in bytes
+	ContextLength   int     // Context length
+	ExpiresAt       time.Time // When the model expires from memory
+	GPUPercent      float64    // Percentage of model on GPU (0-100)
+	Format          string        // Model format (gguf, safetensors, etc.)
+	Family          string         // Model family (llama, gpt2, etc.)
+	Families        []string `json:"families,omitempty"` // List of model families
+	ParameterSize   string    // Parameter count (e.g., "7B", "13B")
+	QuantizationLevel string   // Quantization level (Q4_0, Q8_0, etc.)
+}
+
 type Metrics struct {
 	Start              metric.Int64Gauge
 	Requests           metric.Int64Counter
@@ -29,6 +45,14 @@ type Metrics struct {
 	EvalCount          metric.Int64Counter
 	EvalDuration       metric.Float64Counter
 	PeakMemory         metric.Int64Gauge
+
+	// Running models metrics (from ollama ps)
+	RunningModelsCount metric.Int64Gauge
+	ModelSizeBytes     metric.Int64Gauge
+	ModelVRAMBytes     metric.Int64Gauge
+	ModelContextLength metric.Int64Gauge
+	ModelExpiresAt     metric.Int64Gauge
+	ModelGPUPercent    metric.Float64Gauge
 }
 
 func NewMetrics(meter metric.Meter) *Metrics {
@@ -86,6 +110,42 @@ func NewMetrics(meter metric.Meter) *Metrics {
 		metric.WithUnit("bytes"),
 	)
 
+	runningModelsCount, _ := meter.Int64Gauge(
+		"ollama_running_models",
+		metric.WithDescription("Number of currently running models."),
+		metric.WithUnit("{models}"),
+	)
+
+	modelSizeBytes, _ := meter.Int64Gauge(
+		"ollama_model_size_bytes",
+		metric.WithDescription("Total size of the loaded model in bytes (from ollama ps)."),
+		metric.WithUnit("bytes"),
+	)
+
+	modelVRAMBytes, _ := meter.Int64Gauge(
+		"ollama_model_vram_bytes",
+		metric.WithDescription("GPU VRAM usage of the loaded model in bytes (from ollama ps)."),
+		metric.WithUnit("bytes"),
+	)
+
+	modelContextLength, _ := meter.Int64Gauge(
+		"ollama_model_context_length",
+		metric.WithDescription("Context length of the loaded model (from ollama ps)."),
+		metric.WithUnit("{tokens}"),
+	)
+
+	modelExpiresAt, _ := meter.Int64Gauge(
+		"ollama_model_expires_at_unix",
+		metric.WithDescription("Unix timestamp when the model expires from memory (from ollama ps)."),
+		metric.WithUnit("seconds"),
+	)
+
+	modelGPUPercent, _ := meter.Float64Gauge(
+		"ollama_model_gpu_percent",
+		metric.WithDescription("Percentage of model loaded on GPU (0-100, from ollama ps)."),
+		metric.WithUnit("%"),
+	)
+
 	return &Metrics{
 		Start:              build,
 		Requests:           req,
@@ -96,6 +156,12 @@ func NewMetrics(meter metric.Meter) *Metrics {
 		EvalCount:          evalCount,
 		EvalDuration:       evalDuration,
 		PeakMemory:         peakMemory,
+		RunningModelsCount: runningModelsCount,
+		ModelSizeBytes:     modelSizeBytes,
+		ModelVRAMBytes:     modelVRAMBytes,
+		ModelContextLength: modelContextLength,
+		ModelExpiresAt:     modelExpiresAt,
+		ModelGPUPercent:    modelGPUPercent,
 	}
 }
 
@@ -105,6 +171,29 @@ func (m *Metrics) RecordRequests(ctx context.Context, action string, statusCode 
 		attribute.Int64("status_code", statusCode),
 		attribute.String("status", status),
 	))
+}
+
+// UpdateRunningModels records metrics for all currently running models.
+// This should be called whenever the set of running models changes or before exposing metrics.
+func (m *Metrics) UpdateRunningModels(ctx context.Context, models []RunningModelInfo) {
+	for _, mod := range models {
+		attrs := []attribute.KeyValue{
+			attribute.String("name", mod.Name),
+			attribute.String("digest", mod.Digest),
+			attribute.String("format", mod.Format),
+			attribute.String("family", mod.Family),
+			attribute.String("parameter_size", mod.ParameterSize),
+			attribute.String("quantization_level", mod.QuantizationLevel),
+		}
+
+		m.ModelSizeBytes.Record(ctx, mod.Size, metric.WithAttributes(attrs...))
+		m.ModelVRAMBytes.Record(ctx, mod.SizeVRAM, metric.WithAttributes(attrs...))
+		m.ModelContextLength.Record(ctx, int64(mod.ContextLength), metric.WithAttributes(attrs...))
+		m.ModelExpiresAt.Record(ctx, mod.ExpiresAt.Unix(), metric.WithAttributes(attrs...))
+		m.ModelGPUPercent.Record(ctx, mod.GPUPercent, metric.WithAttributes(attrs...))
+	}
+
+	m.RunningModelsCount.Record(ctx, int64(len(models)))
 }
 
 func NewPrometheusMeterProvider(res *resource.Resource, exp *prometheus.Exporter) (*sdkmetric.MeterProvider, error) {

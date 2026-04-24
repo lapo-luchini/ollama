@@ -2082,8 +2082,13 @@ func (s *Server) SignoutHandler(c *gin.Context) {
 }
 
 func (s *Server) PsHandler(c *gin.Context) {
+	// Update running model metrics for Prometheus
+	runningModels := s.collectRunningModelsInfo()
+	s.metrics.UpdateRunningModels(c.Request.Context(), runningModels)
+
 	models := []api.ProcessModelResponse{}
 
+	s.sched.loadedMu.Lock()
 	for _, v := range s.sched.loaded {
 		model := v.model
 		modelDetails := api.ModelDetails{
@@ -2119,6 +2124,7 @@ func (s *Server) PsHandler(c *gin.Context) {
 
 		models = append(models, mr)
 	}
+	s.sched.loadedMu.Unlock()
 
 	slices.SortStableFunc(models, func(i, j api.ProcessModelResponse) int {
 		// longest duration remaining listed first
@@ -2760,8 +2766,66 @@ func routeToAction(route string) string {
 	}
 }
 
+// collectRunningModelsInfo collects info about all running models for Prometheus metrics.
+// It properly locks the scheduler's loaded map.
+func (s *Server) collectRunningModelsInfo() []telemetry.RunningModelInfo {
+	var models []telemetry.RunningModelInfo
+
+	s.sched.loadedMu.Lock()
+	defer s.sched.loadedMu.Unlock()
+
+	for _, v := range s.sched.loaded {
+		if v.model == nil {
+			continue
+		}
+
+		model := v.model
+		info := telemetry.RunningModelInfo{
+			Name:          model.ShortName,
+			Digest:        model.Digest,
+			Size:          int64(v.totalSize),
+			SizeVRAM:      int64(v.vramSize),
+			ContextLength: 0,
+			ExpiresAt:     v.expiresAt,
+			Format:        model.Config.ModelFormat,
+			Family:        model.Config.ModelFamily,
+			ParameterSize: model.Config.ModelType,
+		}
+
+		if v.llama != nil {
+			info.ContextLength = v.llama.ContextLength()
+			total, vram := v.llama.MemorySize()
+			info.Size = int64(total)
+			info.SizeVRAM = int64(vram)
+		}
+
+		// Calculate GPU percentage (like ollama ps PROCESSOR column)
+		if info.Size > 0 {
+			info.GPUPercent = float64(info.SizeVRAM) / float64(info.Size) * 100
+		} else if info.SizeVRAM > 0 {
+			info.GPUPercent = 100 // Fully on GPU
+		} else {
+			info.GPUPercent = 0 // Fully on CPU
+		}
+
+		// Handle the case where expiresAt might be unix epoch (still loading)
+		var epoch time.Time
+		if info.ExpiresAt == epoch {
+			info.ExpiresAt = time.Now().Add(v.sessionDuration)
+		}
+
+		models = append(models, info)
+	}
+
+	return models
+}
+
 // MetricsHandler returns the gin.HandlerFunc that provides the Prometheus metrics format on GET requests
 func (s *Server) MetricsHandler(c *gin.Context) {
+	// Update running model metrics before exposing them
+	runningModels := s.collectRunningModelsInfo()
+	s.metrics.UpdateRunningModels(c.Request.Context(), runningModels)
+
 	promhttp.Handler().ServeHTTP(c.Writer, c.Request)
 }
 
