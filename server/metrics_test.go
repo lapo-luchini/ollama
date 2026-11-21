@@ -96,12 +96,12 @@ func TestMetricsHandlerOmitsEmptyMetricFamilies(t *testing.T) {
 	// Empty metric maps should only emit build-info and base gauges.
 	for _, unwanted := range []string{
 		"http_requests_total",
-		"ollama_total_duration_seconds",
-		"ollama_load_duration_seconds",
+		"ollama_total_duration_seconds_total",
+		"ollama_load_duration_seconds_total",
 		"ollama_prompt_eval_total",
-		"ollama_prompt_eval_duration_seconds",
+		"ollama_prompt_eval_duration_seconds_total",
 		"ollama_eval_total",
-		"ollama_eval_duration_seconds",
+		"ollama_eval_duration_seconds_total",
 		"ollama_peak_memory_bytes",
 	} {
 		if strings.Contains(body, "# HELP "+unwanted) {
@@ -183,13 +183,13 @@ func TestMetricsHandlerReasonLabels(t *testing.T) {
 
 	body := w.Body.String()
 
-	if !strings.Contains(body, `ollama_prompt_eval_duration_seconds{model="with-reason",reason="timeout"} 0.500000`) {
+	if !strings.Contains(body, `ollama_prompt_eval_duration_seconds_total{model="with-reason",reason="timeout"} 0.500000`) {
 		t.Fatalf("metrics output missing with-reason sample")
 	}
-	if !strings.Contains(body, `ollama_prompt_eval_duration_seconds{model="no-reason"} 0.100000`) {
+	if !strings.Contains(body, `ollama_prompt_eval_duration_seconds_total{model="no-reason"} 0.100000`) {
 		t.Fatalf("metrics output missing no-reason sample")
 	}
-	if strings.Contains(body, `ollama_prompt_eval_duration_seconds{model="no-reason",reason="ignore"}`) {
+	if strings.Contains(body, `ollama_prompt_eval_duration_seconds_total{model="no-reason",reason="ignore"}`) {
 		t.Fatalf("prompt eval should not include reason when includeReason=false")
 	}
 
@@ -241,14 +241,14 @@ func TestMetricsHandlerExpandedMetrics(t *testing.T) {
 		`ollama_build_info{version="0.0.0"} `,
 		`# HELP ollama_peak_memory_bytes The peak memory used during computation in bytes.`,
 		`ollama_peak_memory_bytes{model="llama3",reason="stop"} 120`,
-		"# HELP ollama_total_duration_seconds The request total duration in seconds.",
-		`ollama_total_duration_seconds{model="llama3",reason="stop"} 1.500000`,
-		`ollama_load_duration_seconds{model="llama3",reason="stop"} 0.500000`,
+		"# HELP ollama_total_duration_seconds_total The request total duration in seconds.",
+		`ollama_total_duration_seconds_total{model="llama3",reason="stop"} 1.500000`,
+		`ollama_load_duration_seconds_total{model="llama3",reason="stop"} 0.500000`,
 		`ollama_prompt_eval_total{model="llama3",reason="stop"} 131`,
 		`ollama_prompt_eval_total{model="phi4"} 42`,
-		`ollama_prompt_eval_duration_seconds{model="llama3",reason="stop"} 0.300000`,
+		`ollama_prompt_eval_duration_seconds_total{model="llama3",reason="stop"} 0.300000`,
 		`ollama_eval_total{model="llama3",reason="stop"} 62`,
-		`ollama_eval_duration_seconds{model="llama3",reason="stop"} 0.450000`,
+		`ollama_eval_duration_seconds_total{model="llama3",reason="stop"} 0.450000`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("metrics output missing line %q\n--- got ---\n%s", want, body)
